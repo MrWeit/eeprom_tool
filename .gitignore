@@ -1,2 +1,12 @@
-*.user
+# Compiled source #
+###################
+*.dll
+*.exe
 *.o
+*.so
+*.a
+*.bin
+*.gz
+*.zip
+*.tar
+build/*
