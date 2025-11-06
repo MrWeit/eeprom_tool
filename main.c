@@ -131,6 +131,7 @@ static void encode_eeprom_v4(uint8_t *data, size_t dataSize) {
 }
 
 static void encode_eeprom_v5(uint8_t *data, size_t dataSize) {
+    uint8_t version = data[0];
     uint8_t algorithm_version = data[1] >> 4;
     uint8_t key_index = data[1] & 0xF;
 
@@ -143,11 +144,12 @@ static void encode_eeprom_v5(uint8_t *data, size_t dataSize) {
     data[113] = CalculateCRC(data + 98, 120);
     // Encode Region 2 (bytes 98-113)
     EncodeData(data + 98, 16, algorithm_version, key_index);
-
-    // Calculate and set CRC for Region 3
-    data[249] = CalculateCRC(data + 114, 1080);
-    // Encode Region 3 (bytes 114-249)
-    EncodeData(data + 114, 136, algorithm_version, key_index);
+    if (version>=5){
+        // Calculate and set CRC for Region 3
+        data[249] = CalculateCRC(data + 114, 1080);
+        // Encode Region 3 (bytes 114-249)
+        EncodeData(data + 114, 136, algorithm_version, key_index);
+    }
 }
 
 static void decode_and_print_eeprom(uint8_t *data, size_t dataSize)
@@ -160,6 +162,7 @@ static void decode_and_print_eeprom(uint8_t *data, size_t dataSize)
         decode_eeprom_v4(data, EEPROM_SIZE);
         break;
     case 5:
+    case 6:
         decode_eeprom_v5(data, EEPROM_SIZE);
         break;
     default:
@@ -353,10 +356,10 @@ static void edit_eeprom(EEPROMStructure *eeprom) {
             printf("Enter new Sweep Hashrate: ");
             scanf("%hu", &eeprom->sweep_hashrate);
             break;
-        case 29:
+        case 29://! \todo исправить по формуле
             printf("Enter new Sweep Data (32 uint32_t values, space-separated): ");
-            for (int i = 0; i < 32; i++) {
-                scanf("%u", &eeprom->sweep_data[i]);
+            for (int i = 0; i < 128; i++) {
+                scanf("%u", &eeprom->sweep_level[i]);
             }
             break;
         case 30:
@@ -384,6 +387,7 @@ static void encode_and_save_eeprom(const char *filename, EEPROMStructure *eeprom
         encode_eeprom_v4(data, EEPROM_SIZE);
         break;
     case 5:
+    case 6:
         encode_eeprom_v5(data, EEPROM_SIZE);
         break;
     default:

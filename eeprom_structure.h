@@ -36,9 +36,9 @@ typedef struct __attribute__((__packed__))
     uint8_t reserved[3];                  // 110-112
     uint8_t param_info_crc;               // 113
     uint16_t sweep_hashrate;              // 114-115
-    uint16_t reserved2;                   // 116-117
-    uint8_t reserved3;                    // 118
-    uint32_t sweep_data[32];              // 119-246
+    uint16_t sweep_freq_base;             // 116-117
+    uint8_t sweep_freq_step;              // 118
+    uint8_t sweep_level[128];             // 119-246
     uint8_t sweep_result;                 // 247
     uint8_t reserved4;                    // 248
     uint8_t sweep_crc;                    // 249
