@@ -1,77 +1,112 @@
 #include "crypto.h"
+#include "eeprom_defs.h"
 #include <string.h>
 
 #define DELTA 0x9E3779B9
 
+// XXTEA ключи для S19 (EEPROM v4/v5/v6)
 static const uint8_t KEY_LARGE[4][16] = {
-    "ilijnaiaayuxnixo",
-    "tQ\xed|{\x5c\xd8r\x17O\xe0y\n\x15\xe4\xf5",
-    "uohzoahzuhidkgna",
-    "uileynimdpfnangr"
+	"ilijnaiaayuxnixo",
+	"tQ\xed|{\x5c\xd8r\x17O\xe0y\n\x15\xe4\xf5",
+	"uohzoahzuhidkgna",
+	"uileynimdpfnangr"
+};
+
+// XXTEA ключи для L7 (EEPROM v17)
+static const uint8_t KEY_LARGE_V17[4][16] = {
+	{0x4B, 0x1E, 0x5E, 0x4A, 0x3A, 0x9F, 0xB8, 0xAA,
+	 0x88, 0x8A, 0x51, 0x32, 0x7F, 0xC8, 0x1B, 0xC3},
+
+	{0x67, 0x76, 0x8F, 0x61, 0x7A, 0xC7, 0x2C, 0x3E,
+	 0x7A, 0x7B, 0x12, 0xB2, 0x3B, 0xA3, 0xED, 0xFD},
+
+	"ilijnaianayuxnixo",
+
+	"iewgoahznehzwstg"
 };
 
 static const uint32_t KEY_SMALL[4] = {0xBABEFACE, 0xFEEDCAFE, 0xDEADBEEF, 0xABCD55AA};
 
 static uint32_t MX(uint32_t sum, uint32_t y, uint32_t z, uint32_t p, uint32_t e, const uint32_t *k) {
-    return ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^ ((sum ^ y) + (k[(p & 3) ^ e] ^ z));
+	return ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^ ((sum ^ y) + (k[(p & 3) ^ e] ^ z));
 }
 
 static void XXTEA_encode(uint32_t *v, int n, const uint32_t *k) {
-    uint32_t y, z, sum;
-    unsigned p, rounds, e;
+	uint32_t y, z, sum;
+	unsigned p, rounds, e;
 
-    rounds = 6 + 52/n;
-    sum = 0;
-    z = v[n-1];
-    do {
-        sum += DELTA;
-        e = (sum >> 2) & 3;
-        for (p=0; p<n-1; p++) {
-            y = v[p+1];
-            z = v[p] += MX(sum, y, z, p, e, k);
-        }
-        y = v[0];
-        z = v[n-1] += MX(sum, y, z, p, e, k);
-    } while (--rounds);
+	rounds = 6 + 52/n;
+	sum = 0;
+	z = v[n-1];
+	do {
+		sum += DELTA;
+		e = (sum >> 2) & 3;
+		for (p=0; p<n-1; p++) {
+			y = v[p+1];
+			z = v[p] += MX(sum, y, z, p, e, k);
+		}
+		y = v[0];
+		z = v[n-1] += MX(sum, y, z, p, e, k);
+	} while (--rounds);
 }
 
 static void XXTEA_decode(uint32_t *v, int n, const uint32_t *k) {
-    uint32_t y, z, sum;
-    unsigned p, rounds, e;
+	uint32_t y, z, sum;
+	unsigned p, rounds, e;
 
-    rounds = 6 + 52/n;
-    sum = rounds*DELTA;
-    y = v[0];
-    do {
-        e = (sum >> 2) & 3;
-        for (p=n-1; p>0; p--) {
-            z = v[p-1];
-            y = v[p] -= MX(sum, y, z, p, e, k);
-        }
-        z = v[n-1];
-        y = v[0] -= MX(sum, y, z, p, e, k);
-        sum -= DELTA;
-    } while (--rounds);
+	rounds = 6 + 52/n;
+	sum = rounds*DELTA;
+	y = v[0];
+	do {
+		e = (sum >> 2) & 3;
+		for (p=n-1; p>0; p--) {
+			z = v[p-1];
+			y = v[p] -= MX(sum, y, z, p, e, k);
+		}
+		z = v[n-1];
+		y = v[0] -= MX(sum, y, z, p, e, k);
+		sum -= DELTA;
+	} while (--rounds);
 }
 
-void EncodeData(uint8_t *data, size_t length, uint8_t algorithm_version, uint8_t key_index) {
-    if (algorithm_version == 1) {  // XXTEA
-        XXTEA_encode((uint32_t*)data, length/4, (uint32_t*)KEY_LARGE[key_index]);
-    } else if (algorithm_version == 2) {  // Simple XOR
-        uint32_t key = KEY_SMALL[key_index];
-        for (size_t i = 0; i < length; i += 4) {
-            *(uint32_t*)(data + i) ^= key;
-        }
-    }
+void encode_data(uint8_t *data, size_t length, uint8_t algorithm_version,
+				 uint8_t key_index, EEPROMVersion eeprom_version)
+{
+	const uint8_t (*key_large)[16] = (eeprom_version == EEPROM_VERSION_V17)
+									 ? KEY_LARGE_V17
+									 : KEY_LARGE;
+
+	if (algorithm_version == CRYPTO_ALGORITHM_XXTEA)
+	{
+		XXTEA_encode((uint32_t*)data, length/4, (uint32_t*)key_large[key_index]);
+	}
+	else if (algorithm_version == CRYPTO_ALGORITHM_XOR)
+	{
+		uint32_t key = KEY_SMALL[key_index];
+		for (size_t i = 0; i < length; i += 4)
+		{
+			*(uint32_t*)(data + i) ^= key;
+		}
+	}
 }
 
-void DecodeData(uint8_t *data, size_t length, uint8_t algorithm_version, uint8_t key_index) {
-    if (algorithm_version == 1) {  // XXTEA
-        XXTEA_decode((uint32_t*)data, length/4, (uint32_t*)KEY_LARGE[key_index]);
-    } else if (algorithm_version == 2) {  // Simple XOR
-        EncodeData(data, length, algorithm_version, key_index);  // XOR is symmetric
-    }
+void decode_data(uint8_t *data, size_t length, uint8_t algorithm_version,
+				 uint8_t key_index, EEPROMVersion eeprom_version)
+{
+	const uint8_t (*key_large)[16] = (eeprom_version == EEPROM_VERSION_V17)
+									 ? KEY_LARGE_V17
+									 : KEY_LARGE;
+
+	if (algorithm_version == CRYPTO_ALGORITHM_XXTEA)
+	{
+		XXTEA_decode((uint32_t*)data, length/4, (uint32_t*)key_large[key_index]);
+	}
+	else if (algorithm_version == CRYPTO_ALGORITHM_XOR)
+	{
+		encode_data(data, length, algorithm_version, key_index, eeprom_version);
+	}
 }
+
 static const uint8_t CRC5_Lookup[256]=
 {// CRC-5/BITMAIN = x5 + x2 + 1 POLY=0x5
 0x00, 0x28, 0x50, 0x78, 0xA0, 0x88, 0xF0, 0xD8,
@@ -121,6 +156,8 @@ static uint8_t crc5(uint8_t crc, const uint8_t *ptr, size_t bits)
 	}
 	return (crc>>3);
 }
-uint8_t CalculateCRC(/*uint8_t* crc, */const uint8_t *ptr, size_t bits){
-    return crc5(0xFF, ptr, bits);
+
+uint8_t calculate_crc(const uint8_t *ptr, size_t bits)
+{
+	return crc5(0xFF, ptr, bits);
 }

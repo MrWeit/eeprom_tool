@@ -1,81 +1,54 @@
 #include "eeprom_structure.h"
+#include "eeprom_defs.h"
 #include <string.h>
 #include <stdio.h>
+#include <arpa/inet.h>
+
+// ═══════════════════════════════════════════════════════════════
+// EEPROM v4/v5/v6 (S series)
+// ═══════════════════════════════════════════════════════════════
 
 void eeprom_to_bytes(const EEPROMStructure *eeprom, uint8_t *data)
 {
-	memcpy(data, eeprom, 256);
+	memcpy(data, eeprom, EEPROM_SIZE);
 }
 
 void eeprom_from_bytes(EEPROMStructure *eeprom, const uint8_t *data)
 {
-	memcpy(eeprom, data, 256);
+	memcpy(eeprom, data, EEPROM_SIZE);
 }
 
-void print_eeprom_structure(const EEPROMStructure *eeprom)
+// ═══════════════════════════════════════════════════════════════
+// EEPROM v17 (L series)
+// ═══════════════════════════════════════════════════════════════
+
+void eeprom_v17_parse(EEPROMStructure_v17 *eeprom, const uint8_t *data)
 {
-    printf("EEPROM Ver. : %d\n", eeprom->eeprom_version);
-    printf("Alg Version : %d\n", eeprom->algorithm_and_key_version >> 4);
-    printf("Key Version : %d\n", eeprom->algorithm_and_key_version & 0xF);
+	eeprom->algorithm_and_key = data[0];
+	eeprom->data_length = data[1];
 
-    printf("Board Serial: %.18s\n",eeprom->board_sn);
-    printf("Board Name  : %.9s\n", eeprom->board_name);
-    printf("PCB Version : %04X\n", eeprom->pcb_version);
-    printf("BOM Version : %04X\n", eeprom->bom_version);
-    printf("Chip Die    : %.3s\n", eeprom->chip_die);
-    printf("Chip Tech   : %.3s\n", eeprom->chip_tech);
-    printf("Chip Marking: %.14s\n",eeprom->chip_marking);
-    printf("Chip Bin    : %d\n",   eeprom->chip_bin);
-    printf("ASIC Sensor Type: %d\n", eeprom->asic_sensor_type);
-    if (eeprom->eeprom_version>5) {
-        const uint8_t* offs =  eeprom->asic_sensor_addr;
-        printf("ASIC Sensor Offs:[%X, %X, %X, %X, %X, %X]\n", 
-            offs[0], offs[1], offs[2], offs[3], offs[4], offs[5]);
-    } else {
-        printf("ASIC Sensor Addr:[%X, %X, %X, %X]\n", 
-            eeprom->asic_sensor_addr[0], eeprom->asic_sensor_addr[1],
-            eeprom->asic_sensor_addr[2], eeprom->asic_sensor_addr[3]);
-        printf("PIC  Sensor Type: %d\n", eeprom->pic_sensor_type);
-        printf("PIC  Sensor Mask: %X\n", eeprom->pic_sensor_addr);
-    }
-    printf("Factory Job : %.24s\n",eeprom->factory_job);
-    printf("FT  Version : %.10s\n", eeprom->ft_version);
-    printf("PT1 Result  : %d\n",   eeprom->pt1_result);
-    printf("PT1 Count   : %d\n",   eeprom->pt1_count);
-    printf("Brd Info CRC: %02X\n", eeprom->board_info_crc);
+	memcpy(&eeprom->data,
+		   data + EEPROM_V17_HEADER_SIZE,
+		   EEPROM_V17_DATA_SIZE);
 
-    printf("PSU Voltage : %1.2f V\n", (float)eeprom->voltage/100);
-    printf("Frequency   : %d MHz\n", eeprom->frequency);
-    printf("Nonce Rate  : %d\n", eeprom->nonce_rate);
-    printf("PCB Temp In : %d\n", eeprom->pcb_temp_in);
-    printf("PCB Temp Out: %d\n", eeprom->pcb_temp_out);
-    printf("Test Version: %d\n", eeprom->test_version);
-    printf("Tst Standard: %d\n", eeprom->test_standard);
-    printf("PT2 Result  : %d\n", eeprom->pt2_result);
-    printf("PT2 Count   : %d\n", eeprom->pt2_count);
-    printf("PT2 Info CRC: %02X\n", eeprom->param_info_crc);
+	eeprom->data.test_voltage = ntohs(eeprom->data.test_voltage);
+	eeprom->data.test_frequency = ntohs(eeprom->data.test_frequency);
+	eeprom->data.test_hashrate = ntohs(eeprom->data.test_hashrate);
+}
 
-    if (eeprom->eeprom_version>4) {
-        printf("Sweep H.rate: %d\n", eeprom->sweep_hashrate);
-/*
-        printf("Sweep Data  :");
-        for (int i = 0; i < 32; i++) {
-            if (i % 8 == 0) printf("\n  ");
-            printf("%08X ", eeprom->sweep_data[i]);
-        }
-            */
-        printf("ASIC Freqs:\n");
-        for (int  i = 0; i < 128; i++){
-            uint8_t v0 = eeprom->sweep_level[i] >> 4;
-            uint8_t v1 = eeprom->sweep_level[i] & 0xF;
-            printf(" %03d %03d", 
-                v0 * eeprom->sweep_freq_step + eeprom->sweep_freq_base, 
-                v1 * eeprom->sweep_freq_step + eeprom->sweep_freq_base 
-            );
-            if ((i % 16) == 15) printf("\n");
-        }
-        //printf("\n");
-        printf("Sweep Result: %d\n", eeprom->sweep_result);
-        printf("Sweep CRC   : %02X\n", eeprom->sweep_crc);
-    }
+void eeprom_v17_serialize(const EEPROMStructure_v17 *eeprom, uint8_t *data)
+{
+	EEPROMStructure_v17 temp;
+	memcpy(&temp, eeprom, sizeof(EEPROMStructure_v17));
+
+	temp.data.test_voltage = htons(temp.data.test_voltage);
+	temp.data.test_frequency = htons(temp.data.test_frequency);
+	temp.data.test_hashrate = htons(temp.data.test_hashrate);
+
+	data[0] = temp.algorithm_and_key;
+	data[1] = temp.data_length;
+
+	memcpy(data + EEPROM_V17_HEADER_SIZE,
+		   &temp.data,
+		   EEPROM_V17_DATA_SIZE);
 }

@@ -9,4 +9,22 @@
 *.gz
 *.zip
 *.tar
-build/*
+eeprom_tool
+
+# Build directories
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# IDE files
+CMakeLists.txt.user
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Backup files
+*.backup
+*~
