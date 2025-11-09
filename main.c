@@ -151,9 +151,11 @@ static void encode_and_save_eeprom_v17(const char *filename, EEPROMStructure_v17
 // ═══════════════════════════════════════════════════════════════
 // Главное меню
 // ═══════════════════════════════════════════════════════════════
-
-int main(void)
+#include <locale.h>
+int main(int argc, char *argv[])
 {
+	setlocale(LC_ALL, "en_US.UTF-8");
+
 	char input_filename[MAX_FILENAME];
 	char output_filename[MAX_FILENAME];
 	uint8_t data[EEPROM_SIZE];

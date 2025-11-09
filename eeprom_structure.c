@@ -2,8 +2,22 @@
 #include "eeprom_defs.h"
 #include <string.h>
 #include <stdio.h>
-#include <arpa/inet.h>
-
+//#include <arpa/inet.h>
+#if !defined(__BYTE_ORDER__) || (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+static inline uint16_t htons(uint16_t x){
+    return __builtin_bswap16(x);
+}
+static inline uint16_t ntohs(uint16_t x){
+    return __builtin_bswap16(x);
+}
+#else
+static inline uint16_t htons (uint16_t a){
+    return (a);// BE
+}
+static inline uint16_t ntohs (uint16_t a){
+    return (a);// BE
+}
+#endif
 // ═══════════════════════════════════════════════════════════════
 // EEPROM v4/v5/v6 (S series)
 // ═══════════════════════════════════════════════════════════════
