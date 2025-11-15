@@ -35,10 +35,6 @@ struct _Cipher {
 #   include <arm_acle.h>
 # endif
 
-/*
- * aes_sub() - use the aese instruction to perform the AES sbox substitution
- *             on each byte in 'input'
- */
 static inline uint32_t SubWord(uint32_t x)
 {
 	uint8x16_t v = {0};
@@ -51,17 +47,22 @@ static inline uint8x16_t InvMixColumns4(uint8x16_t v){
 }
 typedef struct _AES_Ctx AES_Ctx;
 struct _AES_Ctx {
-	uint8x16_t  K[10+1];
+	uint8x16_t K[10+1];
 	uint8x16_t iv;
 };
 
 static inline uint8x16_t aes_encrypt_block(AES_Ctx * ctx, uint8x16_t v, const int nr)
 {
-	v = vaeseq_u8(v, ctx->K[0]);
-	for (unsigned int i=1; i<nr; ++i) {
-		v = vaesmcq_u8(v);
-		v = vaeseq_u8(v, ctx->K[i]);
-	}
+	for (unsigned int i=0; i<nr-1; ++i)
+		v = vaesmcq_u8(vaeseq_u8(v, ctx->K[i]));
+	v = vaeseq_u8(v, ctx->K[nr-1]);
+	return veorq_u8(v, ctx->K[nr]);
+}
+static inline uint8x16_t aes_decrypt_block(AES_Ctx * ctx, uint8x16_t v, const int nr)
+{
+	for (unsigned int i=0; i<nr-1; ++i)
+		v = vaesimcq_u8(vaesdq_u8(v, ctx->K[i]));
+	v = vaesdq_u8(v, ctx->K[nr-1]);
 	return veorq_u8(v, ctx->K[nr]);
 }
 
@@ -73,6 +74,17 @@ void AES_EBC_128_encrypt(AES_Ctx*ctx, uint8_t* dst, const uint8_t* src, int leng
     for (int i=0;i<blocks;i++) {
         d = vld1q_u8(src+i*16);
         d = aes_encrypt_block(ctx, d, rounds);
+		vst1q_u8(dst+i*16, d);
+    }
+}
+void AES_EBC_128_decrypt(AES_Ctx*ctx, uint8_t* dst, const uint8_t* src, int length)
+{
+	const int rounds = 10;// важно чтобы это была константа 
+    uint8x16_t d;
+    int blocks = length>>4;
+    for (int i=0;i<blocks;i++) {
+        d = vld1q_u8(src+i*16);
+        d = aes_decrypt_block(ctx, d, rounds);
 		vst1q_u8(dst+i*16, d);
     }
 }
@@ -88,13 +100,34 @@ void AES_CBC_128_encrypt(AES_Ctx*ctx, uint8_t* dst, const uint8_t* src, int leng
 		vst1q_u8(dst+i*16, v);
     }
 }
+void AES_CBC_128_decrypt(AES_Ctx *ctx, uint8_t* dst, const uint8_t* src, int length)
+{
+	const int rounds = 10;
+    int i=length>>4;
+    uint8x16_t d,v;
+	v = vld1q_u8(src+16*i-16);
+    do {
+        d = aes_decrypt_block(ctx, v, rounds);
+        if ((--i)==0) break;
+        v = vld1q_u8( src+16*i-16);
+		vst1q_u8(dst+i*16, veorq_u8(d, ctx->K[i]));
+    } while(1);
+    vst1q_u8(dst+i*16, veorq_u8(d, ctx->iv));
+}
+
 #define ROTL(x,n) ((x)<<(n)) ^ ((x)>>(32-(n)))
 #define ROTR(x,n) ((x)>>(n)) ^ ((x)<<(32-(n)))
 
 /*! AES-128 разгибание ключа
     Nk -- длина ключа 4 слова (128 бит)
+
+	ekb - длина ключа {128, 192, 256} & 10000h - decrypt keys
+
+	AES-128 инверсия развернутого ключа для обратного преобразования
+    первый и последний ключи остаются без изменений, остальные инвертируются
+
  */
-static void KeyExpansion(AES_Ctx * ctx, const uint8_t* key, int ekb)
+void KeyExpansion(AES_Ctx * ctx, const uint8_t* key, int ekb)
 {
     uint32_t *w = (uint32_t*)ctx->K;//,
     int Nk = (ekb&0xFFFF)/32;
@@ -116,12 +149,23 @@ static void KeyExpansion(AES_Ctx * ctx, const uint8_t* key, int ekb)
         }
         w[i] = w[i-Nk] ^ temp;
     }
-    if (ekb>>16) {
-        //InvMixColumns(&w[4],4*(Nk+5));//-Nk-4);
-        for (i=1;i<(6+Nk);i++){
-            ctx->K[i] = InvMixColumns4(ctx->K[i]);
+    if (ekb>>16) {// decrypt keys
+		const int Nr = 10;
+		uint8x16_t t0 = ctx->K[Nr];
+		uint8x16_t t1 = ctx->K[0];
+		ctx->K[0] = t0;
+		ctx->K[Nr] = t1;
+        for (i=1;i<Nr/2;i++){
+			t0 = InvMixColumns4(ctx->K[Nr-i]);
+			t1 = InvMixColumns4(ctx->K[i]);
+            ctx->K[i] = t0;
+            ctx->K[Nr-i] = t1;
 		}
+		ctx->K[Nr/2] = InvMixColumns4(ctx->K[Nr/2]);
     }
+}
+void AES_set_iv(AES_Ctx * ctx, uint8_t* iv, int iv_len){
+	ctx->iv = vld1q_u8(iv);
 }
 #if defined(TEST_AES)
 
@@ -184,6 +228,13 @@ int main(int argc, char* argv[])
 	};
 
 	if (0 == memcmp(result+3, exp, 16))
+		printf("SUCCESS!!!\n");
+	else
+		printf("FAILURE!!!\n");
+
+	KeyExpansion(&aes_ctx, key, 128| (1u<<16));
+	AES_EBC_128_decrypt(&aes_ctx, result+3, exp, 16);
+	if (0 == memcmp(result+3, input, 16))
 		printf("SUCCESS!!!\n");
 	else
 		printf("FAILURE!!!\n");
